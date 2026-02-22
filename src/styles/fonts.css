@@ -1,0 +1,53 @@
+/* Language-specific font stacks. Applied via data-script on <html>. */
+:root,
+[data-script="latin"] {
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+[data-script="arabic"] {
+  --font-body: "Noto Sans Arabic", "Inter", system-ui, sans-serif;
+}
+
+[data-script="devanagari"] {
+  --font-body: "Noto Sans Devanagari", "Inter", system-ui, sans-serif;
+}
+
+[data-script="gurmukhi"] {
+  --font-body: "Noto Sans Gurmukhi", "Inter", system-ui, sans-serif;
+}
+
+[data-script="malayalam"] {
+  --font-body: "Noto Sans Malayalam", "Inter", system-ui, sans-serif;
+}
+
+[data-script="kannada"] {
+  --font-body: "Noto Sans Kannada", "Inter", system-ui, sans-serif;
+}
+
+[data-script="bengali"] {
+  --font-body: "Noto Sans Bengali", "Inter", system-ui, sans-serif;
+}
+
+[data-script="tamil"] {
+  --font-body: "Noto Sans Tamil", "Inter", system-ui, sans-serif;
+}
+
+[data-script="telugu"] {
+  --font-body: "Noto Sans Telugu", "Inter", system-ui, sans-serif;
+}
+
+[data-script="japanese"] {
+  --font-body: "Noto Sans JP", "Inter", system-ui, sans-serif;
+}
+
+[data-script="korean"] {
+  --font-body: "Noto Sans KR", "Inter", system-ui, sans-serif;
+}
+
+[data-script="thai"] {
+  --font-body: "Noto Sans Thai", "Inter", system-ui, sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+}
