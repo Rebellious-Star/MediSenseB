@@ -121,7 +121,7 @@ export function HomePage() {
               </p>
 
               <div className="flex flex-wrap gap-4 pt-4">
-                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-blue-100 hover:border-blue-300 transition-all">
+                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-blue-100 hover:border-blue-300 duration-300">
                   <div className="flex items-center gap-3">
                     <Clock className="size-6 text-blue-600" />
                     <div>
@@ -130,7 +130,7 @@ export function HomePage() {
                     </div>
                   </div>
                 </div>
-                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-emerald-100 hover:border-emerald-300 transition-all">
+                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-emerald-100 hover:border-emerald-300 duration-300">
                   <div className="flex items-center gap-3">
                     <Award className="size-6 text-emerald-600" />
                     <div>
@@ -139,7 +139,7 @@ export function HomePage() {
                     </div>
                   </div>
                 </div>
-                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-sky-100 hover:border-sky-300 transition-all">
+                <div className="bg-white/90 backdrop-blur-sm px-6 py-4 rounded-xl shadow-lg border-2 border-sky-100 hover:border-sky-300 duration-300">
                   <div className="flex items-center gap-3">
                     <Users className="size-6 text-sky-600" />
                     <div>
@@ -151,7 +151,7 @@ export function HomePage() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-5 pt-6">
-                <Button className="bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-10 py-6 text-lg shadow-xl transition-all" asChild>
+                <Button className="bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-10 py-6 text-lg shadow-xl duration-300" asChild>
                   <Link to="/upload-report">
                     {t("home.uploadReport")}
                     <ArrowRight className="ml-2 size-5" />
@@ -237,7 +237,7 @@ export function HomePage() {
               {diseases.concat(diseases).map((disease, index) => (
                 <div
                   key={index}
-                  className="group flex-shrink-0 w-64 bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-emerald-100 hover:border-emerald-300"
+                  className="group flex-shrink-0 w-64 bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl duration-300 cursor-pointer border-2 border-emerald-100 hover:border-emerald-300"
                   onClick={() => setSelectedDisease(disease)}
                 >
                   <div className={`bg-gradient-to-r ${disease.gradient} w-14 h-14 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-lg`}>
@@ -416,7 +416,7 @@ export function HomePage() {
 
           <div className="grid md:grid-cols-3 gap-8">
             {testimonials.map((testimonial, index) => (
-              <Card key={index} className="border-2 border-emerald-100 hover:border-emerald-300 hover:shadow-xl transition-all bg-white">
+              <Card key={index} className="border-2 border-slate-100 hover:border-emerald-200 hover:shadow-xl transition-all bg-white">
                 <CardContent className="p-6 space-y-6">
                   <div className="flex items-center gap-4">
                     <ImageWithFallback

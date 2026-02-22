@@ -144,58 +144,195 @@ export function getCurrentLocation(): Promise<Location> {
   });
 }
 
-export async function getNearbyHospitals(location: Location): Promise<Hospital[]> {
-  if (!isBackendConfigured()) {
-    // Fallback to mock hospital data
-    return getMockHospitals(location);
-  }
-
+// Geocoding function to convert address to coordinates using OpenStreetMap (free, no API key required)
+export async function geocodeAddress(address: string): Promise<Location> {
   try {
-    const hospitals = await request<Hospital[]>("/api/dashboard/hospitals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lat: location.lat, lng: location.lng })
-    });
-    return hospitals;
+    // Use OpenStreetMap Nominatim API (completely free)
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&addressdetails=1`,
+      {
+        headers: {
+          'User-Agent': 'MediSense-Health-App/1.0' // Required by Nominatim policy
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error('Geocoding request failed');
+    }
+    
+    const data = await response.json();
+    
+    if (!data || data.length === 0) {
+      throw new Error('Address not found');
+    }
+    
+    const result = data[0];
+    return {
+      lat: parseFloat(result.lat),
+      lng: parseFloat(result.lon),
+      address: result.display_name || address
+    };
   } catch (error) {
-    console.error("Failed to fetch nearby hospitals, using mock data:", error);
-    return getMockHospitals(location);
+    console.error('OpenStreetMap geocoding failed:', error);
+    throw new Error('Unable to find location. Please check the address and try again.');
   }
 }
 
+export async function getNearbyHospitals(location: Location): Promise<Hospital[]> {
+  try {
+    // Use OpenStreetMap Overpass API to find real hospitals (completely free)
+    const overpassQuery = `
+      [out:json][timeout:25];
+      (
+        node["amenity"="hospital"](around:10000, ${location.lat}, ${location.lng});
+        way["amenity"="hospital"](around:10000, ${location.lat}, ${location.lng});
+        relation["amenity"="hospital"](around:10000, ${location.lat}, ${location.lng});
+      );
+      out geom;
+    `;
+    
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain',
+        'User-Agent': 'MediSense-Health-App/1.0'
+      },
+      body: overpassQuery
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      
+      if (data.elements && data.elements.length > 0) {
+        const hospitals: Hospital[] = data.elements
+          .filter((element: any) => element.tags && element.tags.name)
+          .map((element: any) => {
+            const lat = element.lat || element.center?.lat;
+            const lng = element.lon || element.center?.lon;
+            
+            if (!lat || !lng) return null;
+            
+            return {
+              id: element.id || element.type + '-' + element.id,
+              name: element.tags.name || 'Unknown Hospital',
+              address: element.tags['addr:street'] || 
+                      element.tags['addr:full'] || 
+                      `${Math.abs(lat).toFixed(4)}°, ${Math.abs(lng).toFixed(4)}°`,
+              lat: lat,
+              lng: lng,
+              phone: element.tags.phone || element.tags['contact:phone'] || 'Phone not available',
+              emergency: element.tags.emergency === 'yes' || 
+                       element.tags['emergency'] === 'yes' ||
+                       element.tags.name?.toLowerCase().includes('emergency'),
+              specialties: extractSpecialties(element.tags),
+              rating: 0, // Overpass doesn't provide ratings
+              distance: calculateDistance(location, { lat, lng })
+            };
+          })
+          .filter((hospital: Hospital | null): hospital is Hospital => hospital !== null)
+          .sort((a: Hospital, b: Hospital) => (a.distance || 0) - (b.distance || 0));
+        
+        if (hospitals.length > 0) {
+          console.log(`Found ${hospitals.length} real hospitals via OpenStreetMap`);
+          return hospitals;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('OpenStreetMap Overpass API failed:', error);
+  }
+  
+  // Fallback to dynamic mock hospital data
+  console.log('Using fallback mock hospitals');
+  return getMockHospitals(location);
+}
+
+// Helper function to extract hospital specialties from OpenStreetMap tags
+function extractSpecialties(tags: any): string[] {
+  const specialties: string[] = [];
+  
+  // Common healthcare specialty tags in OpenStreetMap
+  const specialtyMap: Record<string, string> = {
+    'emergency': 'Emergency Medicine',
+    'cardiology': 'Cardiology',
+    'neurology': 'Neurology',
+    'orthopedics': 'Orthopedics',
+    'pediatrics': 'Pediatrics',
+    'maternity': 'Maternity',
+    'oncology': 'Oncology',
+    'radiology': 'Radiology',
+    'surgery': 'Surgery',
+    'trauma': 'Trauma Care',
+    'urgent_care': 'Urgent Care'
+  };
+  
+  // Check tags for specialties
+  Object.keys(tags).forEach(key => {
+    const lowerKey = key.toLowerCase();
+    Object.keys(specialtyMap).forEach(specialty => {
+      if (lowerKey.includes(specialty) || tags[key].toLowerCase().includes(specialty)) {
+        const mappedSpecialty = specialtyMap[specialty];
+        if (!specialties.includes(mappedSpecialty)) {
+          specialties.push(mappedSpecialty);
+        }
+      }
+    });
+  });
+  
+  // Default specialties if none found
+  if (specialties.length === 0) {
+    specialties.push('General Medicine', 'Emergency Care');
+  }
+  
+  return specialties;
+}
+
 function getMockHospitals(location: Location): Hospital[] {
+  // Create mock hospitals based on user's actual location
   const mockHospitals: Hospital[] = [
     {
       id: "h1",
       name: "City General Hospital",
-      address: "123 Main St, New York, NY",
-      lat: 40.7128,
-      lng: -74.0060,
-      phone: "+1 212-555-0123",
+      address: `Near ${location.address}`,
+      lat: location.lat + 0.01,
+      lng: location.lng + 0.01,
+      phone: "+1 555-0123",
       emergency: true,
       specialties: ["Emergency", "General Medicine", "Surgery"],
-      rating: 4.5
+      rating: 4.2
     },
     {
       id: "h2",
       name: "MediCare Center",
-      address: "456 Health Ave, New York, NY",
-      lat: 40.7589,
-      lng: -73.9851,
-      phone: "+1 212-555-0456",
+      address: `Near ${location.address}`,
+      lat: location.lat - 0.01,
+      lng: location.lng - 0.01,
+      phone: "+1 555-0456",
       emergency: false,
       specialties: ["Cardiology", "Neurology", "Orthopedics"],
-      rating: 4.7
+      rating: 4.5
     },
     {
       id: "h3",
       name: "Emergency Medical Center",
-      address: "789 Emergency Rd, New York, NY",
-      lat: 40.7489,
-      lng: -73.9680,
-      phone: "+1 212-555-0789",
+      address: `Near ${location.address}`,
+      lat: location.lat + 0.02,
+      lng: location.lng - 0.01,
+      phone: "+1 555-0789",
       emergency: true,
       specialties: ["Emergency", "Trauma", "Urgent Care"],
+      rating: 4.0
+    },
+    {
+      id: "h4",
+      name: "Regional Medical Center",
+      address: `Near ${location.address}`,
+      lat: location.lat - 0.02,
+      lng: location.lng + 0.01,
+      phone: "+1 555-0987",
+      emergency: true,
+      specialties: ["Emergency", "Pediatrics", "Maternity"],
       rating: 4.3
     }
   ];

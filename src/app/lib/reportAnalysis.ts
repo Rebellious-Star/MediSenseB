@@ -18,7 +18,84 @@ const MEDICAL_TERMS = [
   "hemoglobin", "RBC", "WBC", "platelet", "TSH", "T3", "T4", "blood pressure", "BMI",
   "bilirubin", "ALT", "AST", "ALP", "urea", "BUN", "sodium", "potassium", "calcium",
   "vitamin D", "vitamin B12", "ferritin", "ESR", "CRP", "Hb", "RBC count", "platelets",
+  // Additional medical terms for better detection
+  "diagnosis", "treatment", "medication", "prescription", "symptoms", "examination",
+  "laboratory", "lab test", "blood test", "urine test", "x-ray", "ct scan", "mri",
+  "ultrasound", "ecg", "eeg", "pathology", "clinical", "patient", "medical history",
+  "physical examination", "vital signs", "pulse", "temperature", "respiratory", "heart rate",
+  "systolic", "diastolic", "fasting", "random", "specimen", "sample", "diagnosis",
+  "prognosis", "therapy", "surgery", "operation", "procedure", "consultation",
+  "follow-up", "checkup", "screening", "diagnostic", "prognosis", "mortality",
+  "morbidity", "chronic", "acute", "infection", "inflammation", "disease",
+  "condition", "disorder", "syndrome", "pathology", "abnormal", "normal",
+  "range", "reference", "value", "result", "finding", "conclusion", "impression"
 ];
+
+// Non-medical terms to reject
+const NON_MEDICAL_INDICATORS = [
+  "meeting", "agenda", "minutes", "presentation", "business", "financial", "budget",
+  "marketing", "sales", "revenue", "profit", "invoice", "contract", "agreement",
+  "legal", "court", "lawsuit", "insurance", "policy", "claim", "coverage",
+  "recipe", "ingredients", "cooking", "baking", "restaurant", "menu", "food",
+  "travel", "vacation", "hotel", "flight", "booking", "reservation", "itinerary",
+  "education", "school", "university", "course", "exam", "grade", "student",
+  "entertainment", "movie", "music", "game", "sport", "team", "player",
+  "shopping", "product", "price", "discount", "sale", "order", "delivery",
+  "weather", "forecast", "temperature", "rain", "snow", "wind", "climate"
+];
+
+function isValidMedicalReport(text: string): { isValid: boolean; reason: string } {
+  const lowerText = text.toLowerCase();
+  
+  // Count medical terms found
+  const medicalTermsFound = MEDICAL_TERMS.filter(term => 
+    lowerText.includes(term.toLowerCase())
+  ).length;
+  
+  // Count non-medical indicators
+  const nonMedicalTermsFound = NON_MEDICAL_INDICATORS.filter(term => 
+    lowerText.includes(term.toLowerCase())
+  ).length;
+  
+  // Check for common medical report patterns
+  const hasMedicalPatterns = 
+    /\b\d+\.?\d*\s*(?:mg\/dl|mmol\/l|g\/dl|u\/l|ng\/ml|pg\/ml)\b/i.test(text) || // Lab values with units
+    /\b(normal|abnormal|high|low|elevated|decreased|within range)\b/i.test(text) || // Medical status terms
+    /\b(patient|subject|specimen|sample)\b/i.test(text) || // Medical context
+    /\b(diagnosis|impression|conclusion|finding|result)\b/i.test(text); // Medical conclusions
+  
+  // Minimum requirements for medical report
+  const minMedicalTerms = 3;
+  const hasEnoughMedicalTerms = medicalTermsFound >= minMedicalTerms;
+  const hasTooManyNonMedical = nonMedicalTermsFound >= 3;
+  
+  // Decision logic
+  if (hasTooManyNonMedical && !hasEnoughMedicalTerms) {
+    return {
+      isValid: false,
+      reason: "This document appears to be non-medical content (business, legal, or other non-healthcare related). Please upload a medical report or health document."
+    };
+  }
+  
+  if (!hasEnoughMedicalTerms && !hasMedicalPatterns) {
+    return {
+      isValid: false,
+      reason: "This document doesn't contain sufficient medical terminology or health-related content to be analyzed as a medical report. Please upload a valid medical report, lab results, or health document."
+    };
+  }
+  
+  if (text.length < 50) {
+    return {
+      isValid: false,
+      reason: "Document is too short to be a medical report. Please upload a complete medical report or health document."
+    };
+  }
+  
+  return {
+    isValid: true,
+    reason: "Valid medical report detected with sufficient medical terminology."
+  };
+}
 
 function pickFromReport(text: string, terms: string[]): string[] {
   const lower = text.toLowerCase();
@@ -29,14 +106,24 @@ function pickFromReport(text: string, terms: string[]): string[] {
   return found.length ? found : ["General health markers"];
 }
 
-/** Mock analysis: derives a plausible report from extracted text. Use real API (e.g. OpenAI) when VITE_OPENAI_API_KEY is set. */
+import { enhancedAnalyzeReport } from './ragAnalysis';
+
+/** Enhanced analysis: uses RAG for better, context-aware results when available, falls back to mock analysis */
 export async function analyzeReportText(text: string): Promise<AnalysisResult> {
+  // First validate if this is a medical report
+  const validation = isValidMedicalReport(text);
+  
+  if (!validation.isValid) {
+    throw new Error(validation.reason);
+  }
+  
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined;
   if (apiKey && text.length > 50) {
     try {
-      return await analyzeWithOpenAI(text, apiKey);
+      // Use RAG-enhanced analysis with OpenAI
+      return await enhancedAnalyzeReport(text);
     } catch (e) {
-      console.warn("OpenAI analysis failed, using built-in analysis:", e);
+      console.warn("RAG-enhanced analysis failed, using built-in analysis:", e);
     }
   }
   return mockAnalyze(text);
@@ -100,23 +187,65 @@ Status: use "normal" for within range, "attention" for borderline, "critical" fo
 function mockAnalyze(text: string): AnalysisResult {
   const termsFound = pickFromReport(text, MEDICAL_TERMS);
   const hasNumbers = /\d+\.?\d*/.test(text);
-  const summary = hasNumbers
-    ? `Your report appears to include lab values and health metrics. We identified references to: ${termsFound.slice(0, 5).join(", ")}. The analysis below is a structured interpretation based on the extracted text. Always confirm with your doctor.`
-    : "We've processed your document. Below is a structured overview. For precise interpretation of values and ranges, please share with your healthcare provider.";
-
-  const findings = termsFound.slice(0, 6).map((label, i) => ({
-    label,
-    value: "See report",
-    status: (["normal", "attention", "normal"] as const)[i % 3],
-    note: "Value and range should be verified with your doctor.",
-  }));
-
-  const symptoms: string[] = [
-    "Fatigue or low energy",
-    "Headaches or lightheadedness",
-    "Shortness of breath on exertion",
-    "Unintentional weight changes",
-  ];
+  const lowerText = text.toLowerCase();
+  
+  // Generate more specific analysis based on actual content
+  let summary: string;
+  let symptoms: string[] = [];
+  const findings: { label: string; value: string; status: "normal" | "attention" | "critical"; note?: string }[] = [];
+  
+  // Check for specific conditions based on keywords
+  if (lowerText.includes('back pain') || lowerText.includes('spine') || lowerText.includes('vertebrae')) {
+    summary = "Your report appears to reference spinal or back-related health issues. We identified references to: " + termsFound.slice(0, 5).join(", ");
+    symptoms = [
+      "Back pain or discomfort",
+      "Muscle stiffness or spasms", 
+      "Limited range of motion",
+      "Numbness or tingling in extremities"
+    ];
+  } else if (lowerText.includes('heart') || lowerText.includes('cardiac') || lowerText.includes('ecg')) {
+    summary = "Your report appears to include cardiac-related markers and heart health indicators. We identified references to: " + termsFound.slice(0, 5).join(", ");
+    symptoms = [
+      "Chest pain or discomfort",
+      "Irregular heartbeat or palpitations",
+      "Shortness of breath",
+      "Fatigue or weakness"
+    ];
+  } else if (lowerText.includes('blood') || lowerText.includes('glucose') || lowerText.includes('hba1c')) {
+    summary = "Your report appears to include blood test results and metabolic markers. We identified references to: " + termsFound.slice(0, 5).join(", ");
+    symptoms = [
+      "Unusual thirst or hunger",
+      "Frequent urination",
+      "Fatigue or low energy",
+      "Blurred vision"
+    ];
+  } else if (lowerText.includes('cholesterol') || lowerText.includes('lipid')) {
+    summary = "Your report appears to include cholesterol and lipid panel results. We identified references to: " + termsFound.slice(0, 5).join(", ");
+    symptoms = [
+      "High cholesterol may cause fatty deposits in blood vessels",
+      "Increased risk of heart disease",
+      "Potential gallbladder issues",
+      "Yellowish skin growths (xanthomas)"
+    ];
+  } else if (lowerText.includes('thyroid') || lowerText.includes('tsh') || lowerText.includes('t3')) {
+    summary = "Your report appears to include thyroid function tests. We identified references to: " + termsFound.slice(0, 5).join(", ");
+    symptoms = [
+      "Unexplained weight changes",
+      "Temperature sensitivity (hot/cold intolerance)",
+      "Mood changes or depression",
+      "Changes in menstrual patterns"
+    ];
+  } else {
+    summary = hasNumbers
+      ? `Your report appears to include lab values and health metrics. We identified references to: ${termsFound.slice(0, 5).join(", ")}. The analysis below is a structured interpretation based on extracted text. Always confirm with your doctor.`
+      : "We've processed your document. Below is a structured overview. For precise interpretation of values and ranges, please share with your healthcare provider.";
+    symptoms = [
+      "Fatigue or low energy",
+      "Headaches or lightheadedness", 
+      "Shortness of breath on exertion",
+      "Unintentional weight changes"
+    ];
+  }
 
   const prevention: string[] = [
     "Maintain a balanced diet rich in fruits, vegetables, whole grains, and lean protein.",

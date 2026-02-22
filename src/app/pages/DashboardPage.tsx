@@ -19,9 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   Pill,
-  Map,
   Navigation,
-  Bell,
   Newspaper,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
@@ -38,10 +36,9 @@ import {
 } from "../components/ui/dialog";
 import { getStoredUser } from "../api/auth";
 import { getReports, uploadReport, analyzeReport, type ReportItem, type ReportAnalysisResult } from "../api/reports";
+import { getSavedHealthMetrics } from "../api/dashboard";
 import {
-  getHealthMetrics,
-  getAppointments,
-  getSavedHealthMetrics,
+  getSavedAppointments,
   saveHealthMetrics,
   getMatchingDoctors,
   addSavedAppointment,
@@ -50,9 +47,9 @@ import {
   type Appointment,
   type Doctor,
   type Hospital,
-  type Location,
   getCurrentLocation,
   getNearbyHospitals,
+  geocodeAddress,
 } from "../api/dashboard";
 
 const METRICS_REF_ID = "dashboard-health-metrics";
@@ -85,10 +82,8 @@ export function DashboardPage() {
   const [selectedSymptom, setSelectedSymptom] = useState<string | null>(null);
   const [userWeight, setUserWeight] = useState<string>("");
   const [userAge, setUserAge] = useState<string>("");
-  const [showDosageForm, setShowDosageForm] = useState(false);
   
   // Location and hospital state
-  const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [nearbyHospitals, setNearbyHospitals] = useState<Hospital[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -101,7 +96,9 @@ export function DashboardPage() {
   useEffect(() => {
     getReports().then(setRecentReports).catch(() => {});
     setHealthMetrics(getSavedHealthMetrics());
-    getAppointments().then(setUpcomingAppointments).catch(() => {});
+    // Load real appointments from storage
+    const savedAppointments = getSavedAppointments();
+    setUpcomingAppointments(savedAppointments);
   }, []);
 
   const openMetricsModal = () => {
@@ -146,24 +143,57 @@ export function DashboardPage() {
   const confirmAppointment = async () => {
     if (!selectedDoctor || !selectedSlot) return;
     const date = scheduleDate || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    await addSavedAppointment({
+    const appointmentData = {
       title: selectedDoctor.specialty + " – " + selectedDoctor.name,
       date,
       time: selectedSlot,
       doctor: selectedDoctor.name,
       contact: selectedDoctor.contactNo,
       venue: selectedDoctor.venue,
-    });
+      hospitalId: selectedHospital?.id,
+      reminder: true
+    };
+    
+    await addSavedAppointment(appointmentData);
+    
+    // Request notification permission and set up reminder
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+      
+      if (Notification.permission === 'granted') {
+        // Parse appointment date and time
+        const appointmentDateTime = new Date(`${date} ${selectedSlot}`);
+        const now = new Date();
+        const timeUntilAppointment = appointmentDateTime.getTime() - now.getTime();
+        
+        // Schedule reminder 1 hour before appointment
+        if (timeUntilAppointment > 3600000) { // More than 1 hour away
+          setTimeout(() => {
+            new Notification('Appointment Reminder', {
+              body: `Your appointment with ${selectedDoctor.name} is in 1 hour at ${selectedSlot}`,
+              icon: '/favicon.ico',
+              tag: `appointment-${Date.now()}`,
+              requireInteraction: true
+            });
+          }, timeUntilAppointment - 3600000);
+        }
+        
+        // Show immediate confirmation
+        new Notification('Appointment Confirmed', {
+          body: `Your appointment with ${selectedDoctor.name} is scheduled for ${date} at ${selectedSlot}`,
+          icon: '/favicon.ico',
+          tag: `appointment-confirm-${Date.now()}`
+        });
+      }
+    }
+    
     setUpcomingAppointments((prev) => [
       {
         id: Date.now().toString(),
         userId: user?.id || 'anonymous',
-        title: selectedDoctor.specialty + " – " + selectedDoctor.name,
-        date,
-        time: selectedSlot,
-        doctor: selectedDoctor.name,
-        contact: selectedDoctor.contactNo,
-        venue: selectedDoctor.venue,
+        ...appointmentData,
       },
       ...prev,
     ]);
@@ -182,7 +212,6 @@ export function DashboardPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const validTypes = [".pdf", ".ppt", ".pptx", ".txt", ".doc", ".docx"];
-    const validImages = "image/jpeg,image/png,image/gif,image/webp";
     const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
     const isImage = file.type.startsWith("image/");
     if (!validTypes.includes(ext) && !isImage) {
@@ -208,8 +237,9 @@ export function DashboardPage() {
         setRecentReports((prev) =>
           prev.map((r) => (r.id === result.id ? { ...r, status: analysis.status || "Reviewed", color: "emerald" as const } : r))
         );
-      } catch {
-        setAnalysisError("Analysis failed. Your report was uploaded; you can try again later.");
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Analysis failed. Your report was uploaded; you can try again later.";
+        setAnalysisError(errorMessage);
         setRecentReports((prev) => prev.map((r) => (r.id === result.id ? { ...r, status: "Pending", color: "blue" as const } : r)));
       } finally {
         setAnalyzingReport(false);
@@ -301,9 +331,6 @@ export function DashboardPage() {
 
   const handleSymptomSelect = (symptom: string) => {
     setSelectedSymptom(symptom === selectedSymptom ? null : symptom);
-    if (symptom && !selectedSymptom) {
-      setShowDosageForm(true);
-    }
   };
 
   const calculateDosage = (baseDosage: string, weight?: number, age?: number): string => {
@@ -357,75 +384,56 @@ export function DashboardPage() {
     setLocationLoading(true);
     try {
       const location = await getCurrentLocation();
-      setUserLocation(location);
+      
+      // Show user their detected location
+      console.log('Detected location:', location);
+      
       const hospitals = await getNearbyHospitals(location);
       setNearbyHospitals(hospitals);
+      
+      if (hospitals.length > 0) {
+        alert(`Found ${hospitals.length} hospitals near your location`);
+      } else {
+        alert('No hospitals found near your location. Try entering your address manually.');
+      }
     } catch (error) {
       console.error("Failed to get location:", error);
-      // Fallback to manual location entry
+      alert("Unable to get your current location. Please check your browser permissions or enter your address manually.");
     } finally {
       setLocationLoading(false);
     }
   };
 
   const handleManualLocation = async () => {
-    if (!manualLocation.trim()) return;
+    if (!manualLocation.trim()) {
+      alert("Please enter a valid address");
+      return;
+    }
     
     setLocationLoading(true);
     try {
-      // Use mock coordinates for now to avoid API key issues
-      const mockLocation: Location = {
-        lat: 40.7128, // New York coordinates
-        lng: -74.0060,
-        address: manualLocation
-      };
+      // Use a geocoding service to convert address to coordinates
+      const location = await geocodeAddress(manualLocation);
       
-      setUserLocation(mockLocation);
-      const hospitals = await getNearbyHospitals(mockLocation);
+      console.log('Geocoded location:', location);
+      
+      const hospitals = await getNearbyHospitals(location);
       setNearbyHospitals(hospitals);
+      
+      if (hospitals.length > 0) {
+        alert(`Found ${hospitals.length} hospitals near ${location.address}`);
+      } else {
+        alert('No hospitals found for this location. Try a different address.');
+      }
     } catch (error) {
-      console.error("Failed to set location:", error);
+      console.error("Failed to geocode location:", error);
+      alert(`Unable to find location: ${error instanceof Error ? error.message : 'Unknown error'}. Please try a different address or use current location.`);
     } finally {
       setLocationLoading(false);
     }
   };
-
   const handleHospitalSelect = (hospital: Hospital) => {
     setSelectedHospital(hospital);
-  };
-
-  const handleAppointmentReminder = async (appointment: Omit<Appointment, 'id' | 'userId'>) => {
-    const fullAppointment: Appointment = {
-      ...appointment,
-      id: Date.now().toString(),
-      userId: user?.id || 'anonymous',
-      reminder: true,
-      hospitalId: selectedHospital?.id
-    };
-
-    await addSavedAppointment(fullAppointment);
-    
-    // Request notification permission
-    if ('Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission();
-    }
-    
-    // Schedule browser notification
-    if ('serviceWorker' in navigator && selectedHospital) {
-      const appointmentTime = new Date(`${appointment.date} ${appointment.time}`);
-      const now = new Date();
-      const timeUntilAppointment = appointmentTime.getTime() - now.getTime();
-      
-      if (timeUntilAppointment > 0) {
-        setTimeout(() => {
-          new Notification('Appointment Reminder', {
-            body: `Your appointment at ${selectedHospital.name} is in 1 hour`,
-            icon: '/favicon.ico',
-            tag: `appointment-${fullAppointment.id}`
-          });
-        }, timeUntilAppointment - 3600000); // 1 hour before
-      }
-    }
   };
 
   return (
@@ -806,12 +814,15 @@ export function DashboardPage() {
                 <div className="flex gap-2">
                   <Button
                     variant={useCurrentLocation ? "default" : "outline"}
-                    onClick={() => setUseCurrentLocation(!useCurrentLocation)}
+                    onClick={() => {
+                      setUseCurrentLocation(true);
+                      handleGetLocation();
+                    }}
                     className="flex items-center gap-2"
                     disabled={locationLoading}
                   >
                     <Navigation className="size-4" />
-                    Use Current Location
+                    {locationLoading ? "Getting Location..." : "Use Current Location"}
                   </Button>
                   <span className="text-slate-500">or</span>
                   <Input
